@@ -19,152 +19,38 @@
 // 
 //////////////////////////////////////////////////////////////////////////////////
 
+import types_pkg::*;
 
 module Decode(
-    input logic clk,
-    input logic reset,
-    
+    // Upstream
     input logic [31:0] instr,
-    input logic [31:0] PC_in,
+    input logic [31:0] pc_in,
     input logic valid_in,
-    input logic ready_out,
-    
     output logic ready_in,
+    
+    // Downstream 
+    input logic ready_out,
     output logic valid_out,
-    output logic [31:0] PC_out,
-    
-    output logic [4:0] rs1,
-    output logic [4:0] rs2,
-    output logic [4:0] rd,
-    output logic [31:0] imm,
-    output logic [2:0] ALUOp,
-    output logic [6:0] Opcode
-);
-    logic [31:0] PC_out_hold;
-    logic [4:0] rs1_hold;
-    logic [4:0] rs2_hold;
-    logic [4:0] rd_hold;
-    logic [31:0] imm_hold;
-    logic [2:0] ALUOp_hold;
-    logic [6:0] Opcode_hold;
-    
-    logic [4:0] rs1_now;
-    logic [4:0] rs2_now;
-    logic [4:0] rd_now;
-    logic [31:0] imm_now;
-    logic [2:0] ALUOp_now;
-    logic [6:0] Opcode_now;
-        
+    output decode_data data_out
+);      
     ImmGen immgen_dut (
         .instr(instr),
-        .imm(imm_now)
+        .imm(data_out.imm)
     );
     
-    always_comb begin
-        Opcode_now = instr[6:0];
-        // We only support a few instructions, therefore the decoded signals will not fully cover every instruction
-        case (Opcode_now) 
-            // imm_now is already calculated
-            // I-type
-            7'b0010011: begin
-                rs1_now = instr[19:15];
-                rs2_now = 5'b0;
-                rd_now = instr[11:7];
-                ALUOp_now = 3'b000;
-            end
-            // LUI
-            7'b0110111: begin
-                rs1_now = 5'b0;
-                rs2_now = 5'b0;
-                rd_now = instr[11:7];
-                ALUOp_now = 3'b101;
-            end
-            // R-type
-            7'b0110011: begin
-                rs1_now = instr[19:15];
-                rs2_now = instr[24:20];
-                rd_now = instr[11:7];
-                ALUOp_now = 3'b001;
-            end 
-            // L-type
-            7'b0000011: begin
-                rs1_now = instr[19:15];
-                rs2_now = 5'b0;
-                rd_now = instr[11:7];
-                ALUOp_now = 3'b010;
-            end
-            // S-type
-            7'b0100011: begin
-                rs1_now = instr[19:15];
-                rs2_now = instr[24:20];
-                rd_now = 5'b0;
-                ALUOp_now = 3'b011;
-            end
-            // B-type
-            7'b1100011: begin
-                rs1_now = instr[19:15];
-                rs2_now = instr[24:20];
-                rd_now = 5'b0;
-                ALUOp_now = 3'b100;
-            end
-            // J-type
-            7'b1100111: begin
-                rs1_now = instr[19:15];
-                rs2_now = 5'b0;
-                rd_now = instr[11:7];
-                ALUOp_now = 3'b110;
-            end
-            // When the instruction is undefined
-            default: begin 
-                rs1_now = 5'b0;
-                rs2_now = 5'b0;
-                rd_now = 5'b0;
-                ALUOp_now = 3'b0;
-            end
-        endcase
-    end
+    signal_decode decoder(
+        .instr(instr),
+        .rs1(data_out.rs1),
+        .rs2(data_out.rs2),
+        .rd(data_out.rd),
+        .ALUOp(data_out.ALUOp),
+        .Opcode(data_out.Opcode),
+        .fu_mem(data_out.fu_mem),
+        .fu_alu(data_out.fu_alu)
+    );
+  
+    assign data_out.pc = pc_in;
+    assign valid_out = valid_in;
+    assign ready_in = ready_out;
     
-    // Skid buffer part
-    logic full;
-    
-    // Assign output signals accordingly
-    assign valid_out = (full) ? 1'b1 : valid_in;
-    assign ready_in = (full) ? 1'b0 : ready_out;
-    assign rs1 = (full) ? rs1_hold : rs1_now;
-    assign rs2 = (full) ? rs2_hold : rs2_now;
-    assign rd = (full) ? rd_hold : rd_now;
-    assign imm = (full) ? imm_hold : imm_now;
-    assign ALUOp = (full) ? ALUOp_hold : ALUOp_now;
-    assign Opcode = (full) ? Opcode_hold : Opcode_now;
-    assign PC_out = (full) ? PC_out_hold : PC_in;
-    
-    always_ff @(posedge clk) begin 
-        // reset
-        if (reset) begin 
-            rs1_hold <= 5'b0;
-            rs2_hold <= 5'b0;
-            rd_hold <= 5'b0;
-            imm_hold <= 32'b0;
-            ALUOp_hold <= 3'b0;
-            Opcode_hold <= 7'b0;
-            full <= 1'b0;
-            PC_out_hold <= 32'b0;
-        end else begin
-            // Hold the values when downstream can't take it this cycle
-            if (valid_in && !ready_out && !full) begin
-                full <= 1'b1;
-                
-                rs1_hold <= rs1_now;
-                rs2_hold <= rs2_now;
-                rd_hold <= rd_now;
-                imm_hold <= imm_now;
-                ALUOp_hold <= ALUOp_now;
-                Opcode_hold <= Opcode_now;
-                PC_out_hold <= PC_in;
-            // Release the values when downstream is ready
-            end else if (ready_out && full) begin
-                full <= 1'b0;
-            end
-        end
-    end 
 endmodule
