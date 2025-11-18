@@ -7,8 +7,6 @@ module res_station(
     
     // from rename
     input rename_data r_data,
-    input logic [1:0] fu_in,
-    input logic [6:0] Opcode,
     
     // from fu
     input logic mispredict,
@@ -96,9 +94,9 @@ module res_station(
             end
             // Dispatch to RS
             if (in_valid && di_en) begin
-                rs_table[in_idx].fu <= fu_in;
+                rs_table[in_idx].fu <= r_data.fu;
                 rs_table[in_idx].valid <= 1'b1;
-                rs_table[in_idx].Opcode <= Opcode;
+                rs_table[in_idx].Opcode <= r_data.Opcode;
                 rs_table[in_idx].pd <= r_data.pd_new;
                 rs_table[in_idx].ps1 <= r_data.ps1;
                 rs_table[in_idx].ps2 <= r_data.ps2;
@@ -106,6 +104,8 @@ module res_station(
                 rs_table[in_idx].rob_index <= rob_index_in;
                 rs_table[in_idx].ps1_ready <= 1'b0;
                 rs_table[in_idx].ps2_ready <= 1'b0;
+                rs_table[in_idx].func3 <= r_data.func3;
+                rs_table[in_idx].func7 <= r_data.func7;
                 if (preg_rtable[r_data.ps1] && preg_rtable[r_data.ps2] && fu_ready) begin
                     rs_table[in_idx].ready <= 1'b1;
                     rs_table[in_idx].ps1_ready <= 1'b1;

@@ -6,8 +6,8 @@ module rob (
     
     // from rename stage
     input  logic write_en,
-    input  logic [7:0] pd_new_in,
-    input  logic [7:0] pd_old_in,
+    input  logic [6:0] pd_new_in,
+    input  logic [6:0] pd_old_in,
     input logic [31:0] pc_in,
     
     // from FU stage 
@@ -17,18 +17,22 @@ module rob (
     input logic branch,
     input logic [4:0] mispredict_tag,
     
-    // Update RS
-    output logic [4:0] rob_tag_out,
+    // Update free_list
+    output logic [6:0] preg_old,
     output logic valid_retired,
     // Update FU availability
     output logic complete_out,
 
     output logic full,
-    output logic empty
+    output logic empty,
+    // For RS to keep track of the rob index
+    output logic [4:0] ptr
 );
     rob_data rob_table[0:15];
     
     logic [4:0]  w_ptr, r_ptr;      
+    assign ptr = w_ptr;
+    
     logic [4:0]  ctr;            
     
     assign full = (ctr == 16); 
@@ -72,7 +76,7 @@ module rob (
                 // inform reservation station an instruction is retired, 
                 // also reset that row in the table, advance r_ptr by 1
                 if (do_retire) begin
-                    rob_tag_out <= r_ptr;
+                    preg_old <= rab_table[r_ptr].pd_old;
                     valid_retired <= 1'b1;
                     rob_table[r_ptr] <= '0;
                     r_ptr <= (r_ptr == 5'd15) ? 5'b0 : r_ptr + 1;

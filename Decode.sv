@@ -21,7 +21,7 @@
 
 import types_pkg::*;
 
-module Decode(
+module decode(
     // Upstream
     input logic [31:0] instr,
     input logic [31:0] pc_in,
@@ -33,7 +33,7 @@ module Decode(
     output logic valid_out,
     output decode_data data_out
 );      
-    ImmGen immgen_dut (
+    imm_gen imm_gen_dut (
         .instr(instr),
         .imm(data_out.imm)
     );
@@ -45,8 +45,9 @@ module Decode(
         .rd(data_out.rd),
         .ALUOp(data_out.ALUOp),
         .Opcode(data_out.Opcode),
-        .fu_mem(data_out.fu_mem),
-        .fu_alu(data_out.fu_alu)
+        .fu(data_out.fu),
+        .func3(data_out.func3),
+        .func7(data_out.func7)
     );
   
     assign data_out.pc = pc_in;

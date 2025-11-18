@@ -51,11 +51,7 @@ module rename(
     always_ff @(posedge clk) begin
         if (reset) begin
             ctr <= 4'b0;
-            data_out.imm <= '0;
-            data_out.pd_old <= '0;
-            data_out.pd_new <= '0;
-            data_out.ps1 <= '0;
-            data_out.ps2 <= '0;
+            data_out <= '0;
             write_en <= 1'b0;
             valid_out <= 1'b0;
             valid_out_delayed <= 1'b0;
@@ -77,6 +73,11 @@ module rename(
                 data_out.pd_old <= map[data_in.rd];
                 data_out.imm <= data_in.imm;
                 data_out.rob_tag <= ctr;
+                data_out.fu <= data_in.fu;
+                data_out.ALUOp <= data_in.ALUOp;
+                data_out.Opcode <= data_in.Opcode;
+                data_out.func3 <= data_in.func3;
+                data_out.func7 <= data_in.func7;
                 valid_out <= 1'b1;
                 if (write_pd) begin
                     data_out.pd_new <= preg;

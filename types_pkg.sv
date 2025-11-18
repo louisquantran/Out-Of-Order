@@ -12,6 +12,8 @@ package types_pkg;
         logic [2:0] ALUOp;
         logic [6:0] Opcode;
         logic [1:0] fu;
+        logic [2:0] func3;
+        logic [6:0] func7;
     } decode_data;
     
     typedef struct packed {
@@ -22,6 +24,11 @@ package types_pkg;
         logic [6:0] pd_old;
         logic [32:0] imm;
         logic [4:0] rob_tag;
+        logic [2:0] ALUOp;
+        logic [6:0] Opcode;
+        logic [1:0] fu;
+        logic [2:0] func3;
+        logic [6:0] func7;
     } rename_data;
     
     typedef struct packed {
@@ -36,6 +43,8 @@ package types_pkg;
     typedef struct packed {
         logic valid;
         logic [6:0] Opcode;
+        logic [2:0] func3;
+        logic [6:0] func7;
         logic [6:0] pd;
         logic [6:0] ps1;
         logic ps1_ready;
@@ -44,7 +53,6 @@ package types_pkg;
         logic [31:0] imm;
         logic [3:0] rob_index;
         logic [1:0] fu;
-        logic fu_ready;
         logic ready;
     } rs_data;
 endpackage 
