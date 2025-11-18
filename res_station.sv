@@ -1,7 +1,7 @@
 `timescale 1ns / 1ps
 import types_pkg::*;
 
-module alu_res_station(
+module res_station(
     input clk,
     input reset,
     
@@ -15,7 +15,7 @@ module alu_res_station(
     input logic [4:0] mispredict_tag,
     input logic [6:0] ps_in,
     input logic ps_ready,
-    input logic fu_alu_ready,
+    input logic fu_ready,
     
     // from ROB
     input logic [4:0] rob_index_in,
@@ -85,7 +85,7 @@ module alu_res_station(
             end
             for (logic [3:0] i = 0; i < 8; i++) begin
                 if (rs_table[i].valid) begin
-                    if (rs_table[i].ps1_ready && rs_table[i].ps2_ready && fu_alu_ready) begin
+                    if (rs_table[i].ps1_ready && rs_table[i].ps2_ready && fu_ready) begin
                         rs_table[i].ready <= 1'b1;
                     end
                 end
@@ -106,7 +106,7 @@ module alu_res_station(
                 rs_table[in_idx].rob_index <= rob_index_in;
                 rs_table[in_idx].ps1_ready <= 1'b0;
                 rs_table[in_idx].ps2_ready <= 1'b0;
-                if (preg_rtable[r_data.ps1] && preg_rtable[r_data.ps2] && fu_alu_ready) begin
+                if (preg_rtable[r_data.ps1] && preg_rtable[r_data.ps2] && fu_ready) begin
                     rs_table[in_idx].ready <= 1'b1;
                     rs_table[in_idx].ps1_ready <= 1'b1;
                     rs_table[in_idx].ps2_ready <= 1'b1;
