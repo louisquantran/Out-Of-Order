@@ -9,8 +9,6 @@ module res_station_tb;
 
     // DUT inputs
     rename_data r_data_tb;
-    logic [1:0] fu_in_tb;
-    logic [6:0] Opcode_tb;
 
     logic       mispredict_tb;
     logic [4:0] mispredict_tag_tb;
@@ -28,18 +26,16 @@ module res_station_tb;
     logic   full_tb;
     rs_data data_out_tb;
 
-    // Instantiate DUT (matches your latest res_station)
+    // Instantiate DUT (matches latest res_station)
     res_station dut (
         .clk           (clk),
         .reset         (reset),
         .r_data        (r_data_tb),
-        .fu_in         (fu_in_tb),
-        .Opcode        (Opcode_tb),
         .mispredict    (mispredict_tb),
         .mispredict_tag(mispredict_tag_tb),
         .ps_in         (ps_in_tb),
         .ps_ready      (ps_ready_tb),
-        .fu_ready  (fu_ready_tb),
+        .fu_ready      (fu_ready_tb),
         .rob_index_in  (rob_index_in_tb),
         .di_en         (di_en_tb),
         .preg_rtable   (preg_rtable_tb),
@@ -56,7 +52,7 @@ module res_station_tb;
     task automatic dump_rs(input string tag);
         $display("-------- RS dump (%s) @ time %0t --------", tag, $time);
         for (int i = 0; i < 8; i++) begin
-            $display("RS[%0d]: valid=%0b ready=%0b rob=%0d ps1=%0d ps1_r=%0b ps2=%0d ps2_r=%0b pd=%0d",
+            $display("RS[%0d]: valid=%0b ready=%0b rob=%0d ps1=%0d ps1_r=%0b ps2=%0d ps2_r=%0b pd=%0d fu=%0d Opcode=%0b",
                      i,
                      dut.rs_table[i].valid,
                      dut.rs_table[i].ready,
@@ -65,7 +61,9 @@ module res_station_tb;
                      dut.rs_table[i].ps1_ready,
                      dut.rs_table[i].ps2,
                      dut.rs_table[i].ps2_ready,
-                     dut.rs_table[i].pd);
+                     dut.rs_table[i].pd,
+                     dut.rs_table[i].fu,
+                     dut.rs_table[i].Opcode);
         end
         $display("-------------------------------------------");
     endtask
@@ -73,19 +71,19 @@ module res_station_tb;
     // Apply reset
     task automatic apply_reset();
         begin
-            reset            = 1'b1;
-            mispredict_tb    = 1'b0;
-            mispredict_tag_tb= '0;
-            ps_ready_tb      = 1'b0;
-            fu_ready_tb  = 1'b0;
-            di_en_tb         = 1'b0;
-            fu_in_tb         = '0;
-            Opcode_tb        = '0;
-            rob_index_in_tb  = '0;
-            ps_in_tb         = '0;
+            reset             = 1'b1;
+            mispredict_tb     = 1'b0;
+            mispredict_tag_tb = '0;
+            ps_ready_tb       = 1'b0;
+            fu_ready_tb       = 1'b0;
+            di_en_tb          = 1'b0;
+            ps_in_tb          = '0;
 
             // Clear tables
             for (int i = 0; i < 128; i++) preg_rtable_tb[i] = 1'b0;
+
+            // Clear r_data
+            r_data_tb = '0;
 
             // Hold reset for a few cycles
             repeat (4) @(posedge clk);
@@ -113,9 +111,13 @@ module res_station_tb;
             r_data_tb.pd_old  = 7'h00;           // not used here
             r_data_tb.rob_tag = rob_index;       // if used elsewhere
 
-            Opcode_tb       = 7'b0110011;        // R-type
-            rob_index_in_tb = rob_index;
-            fu_in_tb        = fu_id;
+            // NEW: fields now stored inside rename_data
+            r_data_tb.fu      = fu_id;
+            r_data_tb.Opcode  = 7'b0110011;      // R-type example
+            r_data_tb.func3   = 3'b000;
+            r_data_tb.func7   = 7'b0000000;
+
+            rob_index_in_tb   = rob_index;
 
             // Initialize operand-ready table (sampled at dispatch)
             preg_rtable_tb[ps1] = ps1_ready_init;
@@ -156,19 +158,13 @@ module res_station_tb;
         apply_reset();
         dump_rs("after reset");
 
-        $display("\n TEST 1: two instructions, second depends on ps=13 ");
+        $display("\n=== TEST 1: two instructions, second depends on ps=13 ===");
 
         // I0: rob_index = 3, ps1=10, ps2=11, pd=20, operands ready
-        dispatch_instr(7'd10, 7'd11, 7'd20, 5'd3,
-                       /*ps1_ready_init*/ 1'b1,
-                       /*ps2_ready_init*/ 1'b1,
-                       /*fu_id*/          2'd0);
+        dispatch_instr(7'd10, 7'd11, 7'd20, 5'd3, 1'b1, 1'b1, 2'd0);
 
         // I1: rob_index = 5, ps1=12, ps2=13, ps2 not ready yet
-        dispatch_instr(7'd12, 7'd13, 7'd21, 5'd5,
-                       /*ps1_ready_init*/ 1'b1,
-                       /*ps2_ready_init*/ 1'b0,
-                       /*fu_id*/          2'd0);
+        dispatch_instr(7'd12, 7'd13, 7'd21, 5'd5, 1'b1, 1'b0, 2'd0);
 
         dump_rs("after two dispatches");
 
@@ -178,8 +174,7 @@ module res_station_tb;
         dump_rs("after ps broadcast");
 
         // TEST 2: No issue when FU doesn't request (fu_ready=0)
-
-        $display("\nTEST 2: no issue when FU does not request");
+        $display("\n=== TEST 2: no issue when FU does not request ===");
         // RS currently has entries; fu_ready stays 0.
         repeat (5) @(posedge clk);
         dump_rs("after 5 cycles with fu_ready=0");
@@ -190,20 +185,15 @@ module res_station_tb;
         else
             $display("TEST 2 OK: no entries cleared when fu_ready=0 (time=%0t)", $time);
 
-        $display("\nTEST 3: issue when only younger is ready");
+        // TEST 3: Issue when only younger is ready
+        $display("\n=== TEST 3: issue when only younger is ready ===");
         apply_reset();   // start clean
 
         // I0 (older): rob=3, ps2 not ready -> not issueable
-        dispatch_instr(7'd10, 7'd30, 7'd40, 5'd3,
-                       /*ps1_ready_init*/ 1'b1,
-                       /*ps2_ready_init*/ 1'b0,
-                       /*fu_id*/          2'd0);
+        dispatch_instr(7'd10, 7'd30, 7'd40, 5'd3, 1'b1, 1'b0, 2'd0);
 
         // I1 (younger): rob=5, fully ready (operands)
-        dispatch_instr(7'd12, 7'd13, 7'd41, 5'd5,
-                       /*ps1_ready_init*/ 1'b1,
-                       /*ps2_ready_init*/ 1'b1,
-                       /*fu_id*/          2'd0);
+        dispatch_instr(7'd12, 7'd13, 7'd41, 5'd5, 1'b1, 1'b1, 2'd0);
 
         dump_rs("before issue (older not ready, younger ready)");
 
@@ -270,10 +260,7 @@ module res_station_tb;
         preg_rtable_tb[42] = 1'b1;
 
         // Three entries depending on ps1=30
-        dispatch_instr(7'd30, 7'd40, 7'd60, 5'd1,
-                       /*ps1_ready_init*/ 1'b0,
-                       /*ps2_ready_init*/ 1'b1,
-                       /*fu_id*/          2'd0);
+        dispatch_instr(7'd30, 7'd40, 7'd60, 5'd1, 1'b0, 1'b1, 2'd0);
 
         dispatch_instr(7'd30, 7'd41, 7'd61, 5'd2,
                        1'b0, 1'b1, 2'd0);

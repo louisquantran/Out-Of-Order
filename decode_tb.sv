@@ -4,30 +4,31 @@ import types_pkg::*;
 
 module decode_tb;
 
-  // DUT I/O
+  // Local "clock" only for scheduling in TB (decode itself is combinational)
   logic        clk;
   logic        reset;
 
+  // DUT I/O
   logic [31:0] instr;
   logic [31:0] pc_in;
   logic        valid_in;
-  logic        ready_in;  
-  logic        ready_out;
+  logic        ready_in;   // output from decode
+  logic        ready_out;  // input to decode
   logic        valid_out;
   decode_data  data_out;
 
-  // Instantiate DUT
-  Decode dut (
-    .instr    (instr),
-    .pc_in    (pc_in),
-    .valid_in (valid_in),
-    .ready_in (ready_in),
-    .ready_out(ready_out),
-    .valid_out(valid_out),
-    .data_out (data_out)
+  // Instantiate DUT (name must match: 'decode', not 'Decode')
+  decode dut (
+    .instr     (instr),
+    .pc_in     (pc_in),
+    .valid_in  (valid_in),
+    .ready_in  (ready_in),
+    .ready_out (ready_out),
+    .valid_out (valid_out),
+    .data_out  (data_out)
   );
 
-  // Simple clock 
+  // Simple clock for TB bookkeeping
   initial begin
     clk = 0;
     forever #5 clk = ~clk;  // 100 MHz
@@ -35,7 +36,7 @@ module decode_tb;
 
   // One test vector describing an instruction and expected decode result
   typedef struct {
-    string      name;
+    string       name;
     logic [31:0] pc;
     logic [31:0] instr;
     logic [4:0]  rs1;
@@ -44,8 +45,7 @@ module decode_tb;
     logic [31:0] imm;
     logic [2:0]  aluop;
     logic [6:0]  opcode;
-    bit          fu_mem;
-    bit          fu_alu;
+    // NOTE: fu_mem / fu_alu removed; decode_data now has a single 'fu' field.
   } decode_test_t;
 
   // Collection of tests
@@ -57,7 +57,7 @@ module decode_tb;
   begin
     $display("\n--- Running test: %s ---", t.name);
 
-    // Reset before each test to keep 'full' in a clean state
+    // "Reset" TB-side state before each test
     reset     = 1'b1;
     valid_in  = 1'b0;
     ready_out = 1'b0;
@@ -71,7 +71,7 @@ module decode_tb;
     instr     = t.instr;
     pc_in     = t.pc;
     valid_in  = 1'b1;
-    ready_out = 1'b1;  
+    ready_out = 1'b1;  // downstream ready
 
     // Wait a little for combinational decode to settle
     #1;
@@ -125,18 +125,6 @@ module decode_tb;
       num_errors++;
     end
 
-    if (data_out.fu_mem !== t.fu_mem) begin
-      $error("Test '%s': fu_mem mismatch. Got %0b, expected %0b",
-             t.name, data_out.fu_mem, t.fu_mem);
-      num_errors++;
-    end
-
-    if (data_out.fu_alu !== t.fu_alu) begin
-      $error("Test '%s': fu_alu mismatch. Got %0b, expected %0b",
-             t.name, data_out.fu_alu, t.fu_alu);
-      num_errors++;
-    end
-
     if (num_errors == 0)
       $display("Test '%s' PASSED.", t.name);
 
@@ -148,6 +136,7 @@ module decode_tb;
   endtask
 
   initial begin
+    // 1) I-type ADDI x5, x6, -1
     tests.push_back('{
       name  : "I-type ADDI x5, x6, -1",
       pc    : 32'h0000_0000,
@@ -157,9 +146,7 @@ module decode_tb;
       rd    : 5'd5,
       imm   : 32'hFFFF_FFFF,   // sign-extended -1
       aluop : 3'b011,          // from your signal_decode for 0010011
-      opcode: 7'b0010011,
-      fu_mem: 1'b0,
-      fu_alu: 1'b1
+      opcode: 7'b0010011
     });
 
     // 2) LUI x3, 0xABCDE000
@@ -174,9 +161,7 @@ module decode_tb;
       rd    : 5'd3,
       imm   : 32'hABCDE_000,   // upper 20 bits << 12
       aluop : 3'b100,
-      opcode: 7'b0110111,
-      fu_mem: 1'b0,
-      fu_alu: 1'b1
+      opcode: 7'b0110111
     });
 
     // 3) ADD x3, x4, x5
@@ -191,9 +176,7 @@ module decode_tb;
       rd    : 5'd3,
       imm   : 32'h0000_0000,   // R-type, ImmGen should give 0
       aluop : 3'b010,
-      opcode: 7'b0110011,
-      fu_mem: 1'b0,
-      fu_alu: 1'b1
+      opcode: 7'b0110011
     });
 
     // 4) LW x10, -16(x8)
@@ -208,9 +191,7 @@ module decode_tb;
       rd    : 5'd10,
       imm   : 32'hFFFF_FFF0,   // -16
       aluop : 3'b000,
-      opcode: 7'b0000011,
-      fu_mem: 1'b1,
-      fu_alu: 1'b1
+      opcode: 7'b0000011
     });
 
     // 5) SW x5, 8(x8)
@@ -225,9 +206,7 @@ module decode_tb;
       rd    : 5'd0,
       imm   : 32'h0000_0008,
       aluop : 3'b000,
-      opcode: 7'b0100011,
-      fu_mem: 1'b1,
-      fu_alu: 1'b1
+      opcode: 7'b0100011
     });
 
     // 6) BNE x1, x2, 16
@@ -242,9 +221,7 @@ module decode_tb;
       rd    : 5'd0,
       imm   : 32'h0000_0010,   // +16, as a signed immediate
       aluop : 3'b001,
-      opcode: 7'b1100011,
-      fu_mem: 1'b0,
-      fu_alu: 1'b1
+      opcode: 7'b1100011
     });
 
     // 7) JALR x1, 12(x0)
@@ -259,12 +236,9 @@ module decode_tb;
       rd    : 5'd1,
       imm   : 32'h0000_000C,
       aluop : 3'b110,
-      opcode: 7'b1100111,
-      fu_mem: 1'b0,
-      fu_alu: 1'b1
+      opcode: 7'b1100111
     });
 
-    // Run all tests
     // Initial idle state
     reset     = 1'b0;
     valid_in  = 1'b0;
@@ -286,4 +260,3 @@ module decode_tb;
   end
 
 endmodule
-

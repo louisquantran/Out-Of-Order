@@ -76,7 +76,7 @@ module rob (
                 // inform reservation station an instruction is retired, 
                 // also reset that row in the table, advance r_ptr by 1
                 if (do_retire) begin
-                    preg_old <= rab_table[r_ptr].pd_old;
+                    preg_old <= rob_table[r_ptr].pd_old;
                     valid_retired <= 1'b1;
                     rob_table[r_ptr] <= '0;
                     r_ptr <= (r_ptr == 5'd15) ? 5'b0 : r_ptr + 1;
