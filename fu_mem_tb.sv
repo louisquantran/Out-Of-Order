@@ -102,7 +102,7 @@ module fu_mem_tb;
     initial begin
         // Optional waveform dump
         $dumpfile("fu_mem_waves.vcd");
-        $dumpvars(0, tb_fu_mem);
+        $dumpvars(0, fu_mem_tb);
 
         $display("=== Starting FU MEM Simulation ===");
 
