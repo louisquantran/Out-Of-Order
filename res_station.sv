@@ -88,6 +88,7 @@ module res_station(
             end
             // Dispatch to RS
             if (in_valid && di_en) begin
+                rs_table[in_idx].pc <= r_data.pc;
                 rs_table[in_idx].fu <= r_data.fu;
                 rs_table[in_idx].valid <= 1'b1;
                 rs_table[in_idx].Opcode <= r_data.Opcode;

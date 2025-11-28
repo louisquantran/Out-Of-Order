@@ -28,7 +28,9 @@ module rob (
 //    output logic empty,
     // For RS to keep track of the rob index
     output logic [4:0] ptr
+//    output logic [4:0] retired_ptr
 );
+//    assign retired_ptr = r_ptr; 
     rob_data rob_table[0:15];
     
     logic [4:0]  w_ptr, r_ptr;      

@@ -82,7 +82,7 @@ module signal_decode(
                 rs2 = 5'b0;
                 rd = instr[11:7];
                 ALUOp = 3'b110;
-                fu = 2'b01;
+                fu = 2'b10;
                 func3 = instr[14:12];
                 func7 = '0;
             end

@@ -17,9 +17,11 @@ module ooo_top (
     input  logic [4:0]  rob_fu_b,
     input  logic [4:0]  rob_fu_mem,
     input  logic [6:0]  p_alu_in,
+    input  logic [6:0]  p_b_in,
     input  logic [6:0]  p_mem_in,
     input logic [31:0] data_alu_in,
-    input logic [31:0] data_mem_in
+    input logic [31:0] data_mem_in,
+    input logic [31:0] data_b_in
 );
 
     // PC generator
@@ -189,8 +191,10 @@ module ooo_top (
         .mispredict_tag(mispredict_tag), 
         .mispredict(mispredict),
         .ps_alu_in(p_alu_in),
+        .ps_b_in(p_b_in),
         .ps_mem_in(p_mem_in),
         .ps_alu_ready(fu_alu_done),
+        .ps_b_ready(fu_b_done),
         .ps_mem_ready(fu_mem_done),
         .fu_alu_ready(fu_alu_ready),
         .fu_b_ready(fu_b_ready),
@@ -219,7 +223,9 @@ module ooo_top (
     logic [6:0] preg_old;
     logic valid_retired;
 //    logic rob_empty;
-
+    // Signal LSQ
+//    logic [4:0] retired_ptr;
+        
     // ROB
     rob u_rob (
         .clk(clk),
@@ -251,6 +257,7 @@ module ooo_top (
 
         // For RS to keep track of the rob index
         .ptr(rob_index)
+//        .retired_ptr(retired_ptr)
     );
     
     // Read data from physical register file
@@ -271,6 +278,11 @@ module ooo_top (
         .pd_alu_in(p_alu_in),
         
         // From FU Branch
+        .write_b_en(fu_b_done),
+        .data_b_in(data_b_in),
+        .pd_b_in(p_b_in),
+        
+        // From FU Mem
         .write_mem_en(fu_mem_done),
         .data_mem_in(data_mem_in),
         .pd_mem_in(p_mem_in),
@@ -301,10 +313,9 @@ module ooo_top (
     
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
-          pc_reg <= 32'h0000_0000;
+            pc_reg <= 32'h0000_0000;
         end else if (fetch_fire) begin
-          // For now, PC + 4, we will add PC + offset in the future
-          pc_reg <= pc_reg + 32'd4;
+            pc_reg <= pc_reg + 32'd4;
         end
     end
 endmodule

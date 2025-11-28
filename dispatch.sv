@@ -37,6 +37,8 @@ module dispatch(
     input logic [4:0] mispredict_tag,
     input logic [6:0] ps_alu_in,
     input logic [6:0] ps_mem_in,
+    input logic [6:0] ps_b_in,
+    input logic ps_b_ready, 
     input logic ps_alu_ready,
     input logic ps_mem_ready,
     input logic fu_alu_ready,
@@ -89,15 +91,7 @@ module dispatch(
             end
         endcase
     end
-    
-    always_ff @(posedge clk) begin
-        if (ps_alu_ready) begin
-            $display("[%0t] SCOREBOARD: set preg_rtable[%0d]=1 (ALU)", $time, ps_alu_in);
-        end
-        if (di_en_alu && data_q.pd_new != 7'd0) begin
-            $display("[%0t] SCOREBOARD: clear preg_rtable[%0d]=0 (dispatch ALU)", $time, data_q.pd_new);
-        end
-    end
+
     
     logic preg_rtable[0:127];
     always_ff @(posedge clk or posedge reset) begin
@@ -110,8 +104,16 @@ module dispatch(
             if (di_en_alu && data_q.pd_new != 7'd0) begin
                 preg_rtable[data_q.pd_new] <= 1'b0;
             end
-            if (di_en_mem && data_q.pd_new != 7'd0) begin
+            // Branch instructions except S-type
+            if (di_en_mem && data_q.pd_new != 7'd0 && data_q.Opcode != 7'b0100011) begin
                 preg_rtable[data_q.pd_new] <= 1'b0; 
+            end
+            // Jalr
+            if (di_en_b && data_q.pd_new != 7'd0 && data_q.Opcode == 7'b1100111) begin
+                preg_rtable[data_q.pd_new] <= 1'b0;
+            end
+            if (ps_b_ready) begin
+                preg_rtable[ps_b_in] <= 1'b1;
             end
             if (ps_alu_ready) begin
                 preg_rtable[ps_alu_in] <= 1'b1;
