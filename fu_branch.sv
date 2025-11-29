@@ -26,14 +26,12 @@ module fu_branch(
     
     // From ROB
     input logic [4:0] curr_rob_tag,
+    input logic mispredict,
+    input logic [4:0] mispredict_tag,
     
     // From RS
     input rs_data data_in,
     input issued,
-    
-    // From branch itself, this is for multi-cycle branch
-    input logic mispredict,
-    input logic [4:0] mispredict_tag,
     
     // From PRF
     input logic [31:0] ps1_data,

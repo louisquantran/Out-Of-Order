@@ -17,6 +17,11 @@ module rob_tb;
     logic [4:0]  rob_fu_b;
     logic [4:0]  rob_fu_mem;
 
+    // Branch FU → ROB (inputs)
+    logic        br_mispredict;
+    logic [4:0]  br_mispredict_tag;
+
+    // ROB → global (outputs)
     logic        mispredict;
     logic [4:0]  mispredict_tag;
 
@@ -49,24 +54,24 @@ module rob_tb;
     // Reset
     task automatic apply_reset;
         begin
-            reset         = 1;
-            write_en      = 0;
-            pd_new_in     = '0;
-            pd_old_in     = '0;
-            pc_in         = '0;
+            reset          = 1;
+            write_en       = 0;
+            pd_new_in      = '0;
+            pd_old_in      = '0;
+            pc_in          = '0;
 
-            fu_alu_done   = 0;
-            fu_b_done     = 0;
-            fu_mem_done   = 0;
-            rob_fu_alu    = '0;
-            rob_fu_b      = '0;
-            rob_fu_mem    = '0;
+            fu_alu_done    = 0;
+            fu_b_done      = 0;
+            fu_mem_done    = 0;
+            rob_fu_alu     = '0;
+            rob_fu_b       = '0;
+            rob_fu_mem     = '0;
 
-            mispredict    = 0;
-            mispredict_tag= '0;
+            br_mispredict      = 0;
+            br_mispredict_tag  = '0;
 
-            tb_wptr       = '0;
-            tb_rptr       = '0;
+            tb_wptr        = '0;
+            tb_rptr        = '0;
 
             repeat (3) @(posedge clk);
             reset = 0;
@@ -160,15 +165,19 @@ module rob_tb;
     task automatic do_mispredict(input [4:0] tag);
         begin
             $display("[%0t] ---- MISPREDICT at tag=%0d ----", $time, tag);
-            mispredict_tag = tag;
-            mispredict     = 1;
+            br_mispredict_tag = tag;
+            br_mispredict     = 1;
             @(posedge clk);      // DUT recovery
-            mispredict     = 0;
-            mispredict_tag = '0;
+            br_mispredict     = 0;
+            br_mispredict_tag = '0;
             @(posedge clk);
 
             // TB tail mirror becomes branch+1
             tb_wptr = inc16(tag);
+
+            // Optional: check pass-through
+            assert(mispredict == 1'b0) else
+                $fatal(1, "[MISPREDICT] mispredict output should be deasserted after recovery");
         end
     endtask
 
@@ -190,12 +199,14 @@ module rob_tb;
         .rob_fu_alu,
         .rob_fu_b,
         .rob_fu_mem,
-        .mispredict,
-        .mispredict_tag,
+        .br_mispredict      (br_mispredict),
+        .br_mispredict_tag  (br_mispredict_tag),
 
         // outputs
         .preg_old,
         .valid_retired,
+        .mispredict,
+        .mispredict_tag,
         .full,
         .ptr
     );
@@ -208,7 +219,7 @@ module rob_tb;
                         full, dut.ctr);
     end
 
-    // ---------------- Tests ----------------
+    // Tests 
     initial begin
         logic [4:0] t0, t1, t2, t3, t4, t5, newtag;
         int  need_to_full;
@@ -239,7 +250,6 @@ module rob_tb;
             $fatal(1, "[TEST1] ROB not empty at end (occ=%0d)",
                    occ(tb_rptr, tb_wptr));
 
-        $display("------------------------------------------------------------------");
 
         // TEST 2: Mispredict flush (younger-than-branch squashed)
         $display("TEST 2: Mispredict flush");
@@ -266,7 +276,6 @@ module rob_tb;
                 "[TEST2] expected new alloc at tag=%0d, got=%0d",
                 inc16(t3), newtag);
 
-        $display("------------------------------------------------------------------");
 
         // TEST 3: Wrap-around / full behavior
         $display("TEST 3: Wrap-around / full behavior");
@@ -301,7 +310,6 @@ module rob_tb;
         // Allocate again - should succeed now
         alloc(newtag, 7'h70, 7'h60, 32'h0000_4000);
 
-        $display("------------------------------------------------------------------");
         $display("[PASS] All ROB tests completed.");
         $finish;
     end

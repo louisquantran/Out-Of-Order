@@ -9,12 +9,12 @@ module res_station(
     input rename_data r_data,
     
     // from fus
-    input logic mispredict,
-    input logic [4:0] mispredict_tag,
     input logic fu_ready,
     
     // from ROB
     input logic [4:0] rob_index_in,
+    input logic mispredict,
+    input logic [4:0] mispredict_tag,
     
     // from Dispatch
     input logic di_en,

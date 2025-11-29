@@ -7,8 +7,6 @@ module fu_alu(
     
     // From ROB
     input logic [4:0] curr_rob_tag,
-    
-    // From FU branch
     input logic mispredict,
     input logic [4:0] mispredict_tag,
     

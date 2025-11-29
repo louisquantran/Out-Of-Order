@@ -17,20 +17,25 @@ module rob (
     input logic [4:0] rob_fu_alu,
     input logic [4:0] rob_fu_b,
     input logic [4:0] rob_fu_mem,
-    input logic mispredict,
-    input logic [4:0] mispredict_tag,
+    input logic br_mispredict,
+    input logic [4:0] br_mispredict_tag,
     
     // Update free_list
     output logic [6:0] preg_old,
     output logic valid_retired,
 
-    output logic full,
-//    output logic empty,
-    // For RS to keep track of the rob index
-    output logic [4:0] ptr
+    // Global mispredict 
+    output logic mispredict,
+    output logic [4:0] mispredict_tag,
+    output logic [4:0] ptr,
+
+    output logic full
 //    output logic [4:0] retired_ptr
 );
 //    assign retired_ptr = r_ptr; 
+
+    assign mispredict = br_mispredict;
+    assign mispredict_tag = br_mispredict_tag;
     rob_data rob_table[0:15];
     
     logic [4:0]  w_ptr, r_ptr;      
@@ -39,7 +44,6 @@ module rob (
     logic [4:0]  ctr;            
     
     assign full = (ctr == 16); 
-//    assign empty = (ctr == 0);
     
     logic do_write;           
     logic do_retire;
@@ -68,9 +72,9 @@ module rob (
                 rob_table[rob_fu_mem].complete <= 1'b1;
             end
             // Mispredict operation
-            if (mispredict) begin
+            if (br_mispredict) begin
                 automatic logic [4:0] old_w = w_ptr;            
-                automatic logic [4:0] re_ptr = (mispredict_tag==15)?0:mispredict_tag+1;  
+                automatic logic [4:0] re_ptr = (br_mispredict_tag==15)?0:br_mispredict_tag+1;  
                 automatic logic [4:0] newcnt = (re_ptr >= r_ptr) ? (re_ptr - r_ptr) : (5'd16 - r_ptr + re_ptr);
         
                 for (logic [4:0] i=re_ptr; i!=old_w; i=(i==15)?0:i+1) begin

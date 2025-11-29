@@ -31,10 +31,10 @@ module dispatch(
     // Data from ROB
     input logic rob_full,
     input logic [4:0] rob_index_in,
-    
-    // Data from FU
     input logic mispredict,
     input logic [4:0] mispredict_tag,
+    
+    // Data from FU
     input logic [6:0] ps_alu_in,
     input logic [6:0] ps_mem_in,
     input logic [6:0] ps_b_in,
