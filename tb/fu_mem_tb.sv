@@ -14,8 +14,7 @@ module fu_mem_tb;
     logic [4:0]  mispredict_tag;
     rs_data      data_in;
     logic [31:0] ps1_data;
-    logic [31:0] ps2_data;
-    logic [6:0]  pd;
+    logic [31:0] ps2_data;   // unused in current fu_mem but kept for interface
 
     // Outputs from DUT
     mem_data     data_out;
@@ -27,14 +26,21 @@ module fu_mem_tb;
     fu_mem dut (
         .clk            (clk),
         .reset          (reset),
-        .issued         (issued),
+
+        // From ROB
         .curr_rob_tag   (curr_rob_tag),
+
+        // From FU branch
         .mispredict     (mispredict),
         .mispredict_tag (mispredict_tag),
+
+        // From RS + PRF
+        .issued         (issued),
         .data_in        (data_in),
         .ps1_data       (ps1_data),
         .ps2_data       (ps2_data),
-        .pd             (pd),
+
+        // Output
         .data_out       (data_out)
     );
 
@@ -48,11 +54,12 @@ module fu_mem_tb;
     always @(posedge clk) begin
         if (!reset) begin
             assert (!(issued && data_in.Opcode != 7'b0000011))
-            else $error("Issued non-LOAD opcode to fu_mem at time %0t!", $time);
+                else $error("Issued non-LOAD opcode to fu_mem at time %0t!", $time);
         end
     end
 
-    // Tasks
+    // ---------------- Tasks ----------------
+
     // Synchronous reset
     task automatic do_reset();
         begin
@@ -64,7 +71,6 @@ module fu_mem_tb;
             data_in        = '0;
             ps1_data       = '0;
             ps2_data       = '0;
-            pd             = '0;
 
             repeat (3) @(posedge clk);
             reset = 1'b0;
@@ -90,7 +96,6 @@ module fu_mem_tb;
 
             ps1_data             = base_addr;
             ps2_data             = 32'd0;
-            pd                   = 7'd10;
 
             issued = 1'b1;
             @(posedge clk);      // one-cycle issue
@@ -98,7 +103,7 @@ module fu_mem_tb;
         end
     endtask
 
-    // Main Stimulus
+    // --------------- Main Stimulus ---------------
     initial begin
         // Optional waveform dump
         $dumpfile("fu_mem_waves.vcd");
@@ -129,7 +134,6 @@ module fu_mem_tb;
         // Clear inputs after completion
         data_in  = '0;
         ps1_data = '0;
-        pd       = '0;
         @(posedge clk);
 
         // TEST 2: LBU at addr 1
@@ -150,7 +154,6 @@ module fu_mem_tb;
 
         data_in  = '0;
         ps1_data = '0;
-        pd       = '0;
         @(posedge clk);
 
         // TEST 3: Misprediction flush while load in-flight
@@ -164,7 +167,6 @@ module fu_mem_tb;
         data_in.imm          = 32'h0;
         data_in.rob_index    = 5'd5;
         ps1_data             = 32'h0000_0000;
-        pd                   = 7'd10;
 
         issued = 1'b1;
         @(posedge clk);
@@ -192,7 +194,6 @@ module fu_mem_tb;
 
         data_in  = '0;
         ps1_data = '0;
-        pd       = '0;
         @(posedge clk);
 
         // TEST 4: Back-to-back loads (LW then LBU)
@@ -238,7 +239,7 @@ module fu_mem_tb;
                  mispredict,
                  data_out.fu_mem_ready,
                  data_out.fu_mem_done,
-                 dut.addr,
+                 dut.addr,           // internal addr inside fu_mem
                  data_out.data);
     end
 

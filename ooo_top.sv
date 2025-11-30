@@ -4,24 +4,7 @@ import types_pkg::*;
 module ooo_top (
     input  logic clk,
     input  logic reset,
-    input  logic exec_ready,
-
-    // Fake FU interface (from execute back into ROB/dispatch)
-    input  logic        fu_alu_ready,
-    input  logic        fu_b_ready,
-    input  logic        fu_mem_ready,
-    input  logic        fu_alu_done,
-    input  logic        fu_b_done,
-    input  logic        fu_mem_done,
-    input  logic [4:0]  rob_fu_alu,
-    input  logic [4:0]  rob_fu_b,
-    input  logic [4:0]  rob_fu_mem,
-    input  logic [6:0]  p_alu_in,
-    input  logic [6:0]  p_b_in,
-    input  logic [6:0]  p_mem_in,
-    input logic [31:0] data_alu_in,
-    input logic [31:0] data_mem_in,
-    input logic [31:0] data_b_in
+    input  logic exec_ready
 );
 
     // PC generator
@@ -96,15 +79,36 @@ module ooo_top (
         .data_out  (sb_d_out)
     );
     
-    // FU
-    logic mispredict;
-
     // Post-Rename Skid Buffer
     logic r_sb_to_r;
     
     // From Rename to Skid Buffer
     rename_data rename_out;
     logic r_to_bf_di;
+    
+    // DISPATCH SIGNALS:
+    // ROB
+    logic rob_full;
+    logic [4:0] rob_index;
+    logic [4:0] mispredict_tag;
+    logic mispredict;
+    // Update free_list
+    logic [6:0] preg_old;
+    logic valid_retired;
+    
+    // FU
+    alu_data alu_out;
+    b_data b_out;
+    mem_data mem_out;
+    
+    // Output data from 3 RS
+    rs_data rs_alu;
+    rs_data rs_b;
+    rs_data rs_mem;
+    
+    logic alu_issued;
+    logic b_issued;
+    logic mem_issued;
     
     rename u_rename (
         .clk(clk),
@@ -116,7 +120,9 @@ module ooo_top (
         .data_in(sb_d_out),
         .ready_in(r_to_sb_d),
         
-        // From FU
+        // From ROB
+        .write_en(valid_retired),
+        .rob_data_in(preg_old),
         .mispredict(mispredict),
         
         // Downstream
@@ -148,32 +154,6 @@ module ooo_top (
         .data_out(sb_to_di_out)
     );
     
-    // DISPATCH SIGNALS:
-    // From ROB
-    logic rob_full;
-    logic [4:0] rob_index;
-    
-    // From FU:
-    logic [4:0] mispredict_tag;
-//    logic [6:0] ps_in_alu;
-//    logic [6:0] ps_in_b;
-//    logic [6:0] ps_in_mem;
-//    logic ps_alu_ready;
-//    logic ps_b_ready;
-//    logic ps_mem_ready;
-//    logic fu_alu_ready;
-//    logic fu_b_ready;
-//    logic fu_mem_ready;
-    
-    // Output data from 3 RS
-    rs_data rs_alu;
-    rs_data rs_b;
-    rs_data rs_mem;
-    
-    logic alu_issued;
-    logic b_issued;
-    logic mem_issued;
-    
     dispatch u_dispatch (
         .clk(clk),
         .reset(reset),
@@ -186,19 +166,19 @@ module ooo_top (
         // Data from ROB
         .rob_full(rob_full),
         .rob_index_in(rob_index),
-        
-        // Data from FU
         .mispredict_tag(mispredict_tag), 
         .mispredict(mispredict),
-        .ps_alu_in(p_alu_in),
-        .ps_b_in(p_b_in),
-        .ps_mem_in(p_mem_in),
-        .ps_alu_ready(fu_alu_done),
-        .ps_b_ready(fu_b_done),
-        .ps_mem_ready(fu_mem_done),
-        .fu_alu_ready(fu_alu_ready),
-        .fu_b_ready(fu_b_ready),
-        .fu_mem_ready(fu_mem_ready),
+        
+        // Data from FU
+        .ps_alu_in(alu_out.p_alu),
+        .ps_b_in(b_out.p_b),
+        .ps_mem_in(mem_out.p_mem),
+        .ps_alu_ready(alu_out.fu_alu_done),
+        .ps_b_ready(b_out.fu_b_done),
+        .ps_mem_ready(mem_out.fu_mem_done),
+        .fu_alu_ready(alu_out.fu_alu_ready),
+        .fu_b_ready(b_out.fu_b_ready),
+        .fu_mem_ready(mem_out.fu_mem_ready),
         
         // Output data from 3 RS
         .rs_alu(rs_alu),
@@ -213,19 +193,8 @@ module ooo_top (
     // Enable signal from Skid Buffer and Dispatch
     logic rob_write_en;
     assign rob_write_en = r_di_to_sb && v_sb_to_di;
-    // From FU    
-//    logic [4:0] rob_fu_alu;
-//    logic [4:0] rob_fu_b;
-//    logic [4:0] rob_fu_mem;
-
-    // ROB output
-    // Update free_list
-    logic [6:0] preg_old;
-    logic valid_retired;
-//    logic rob_empty;
-    // Signal LSQ
-//    logic [4:0] retired_ptr;
-        
+    
+    
     // ROB
     rob u_rob (
         .clk(clk),
@@ -238,25 +207,26 @@ module ooo_top (
         .pc_in(sb_to_di_out.pc),
         
         // From FUs
-        .fu_alu_done(fu_alu_done),
-        .fu_b_done(fu_b_done),
-        .fu_mem_done(fu_mem_done), 
-        .rob_fu_alu(rob_fu_alu),
-        .rob_fu_mem(rob_fu_mem),
-        .rob_fu_b(rob_fu_b),
-        .mispredict(mispredict),
-        .mispredict_tag(mispredict_tag),
+        .fu_alu_done(alu_out.fu_alu_done),
+        .fu_b_done(b_out.fu_b_done),
+        .fu_mem_done(mem_out.fu_mem_done), 
+        .rob_fu_alu(alu_out.rob_fu_alu),
+        .rob_fu_mem(mem_out.rob_fu_mem),
+        .rob_fu_b(b_out.rob_fu_b),
+        .br_mispredict(b_out.mispredict),
+        .br_mispredict_tag(b_out.mispredict_tag),
         
         
         // Update free_list
         .preg_old(preg_old),
         .valid_retired(valid_retired),
         
-        .full(rob_full),
-//        .empty(rob_empty),
-
-        // For RS to keep track of the rob index
-        .ptr(rob_index)
+        // Mispredict 
+        .mispredict(mispredict),
+        .mispredict_tag(mispredict_tag),
+        .ptr(rob_index),
+        
+        .full(rob_full)
 //        .retired_ptr(retired_ptr)
     );
     
@@ -273,19 +243,19 @@ module ooo_top (
         .reset(reset),
         
         // From FU ALU
-        .write_alu_en(fu_alu_done),
-        .data_alu_in(data_alu_in),
-        .pd_alu_in(p_alu_in),
+        .write_alu_en(alu_out.fu_alu_done),
+        .data_alu_in(alu_out.data),
+        .pd_alu_in(alu_out.p_alu),
         
         // From FU Branch
-        .write_b_en(fu_b_done),
-        .data_b_in(data_b_in),
-        .pd_b_in(p_b_in),
+        .write_b_en(b_out.fu_b_done),
+        .data_b_in(b_out.data),
+        .pd_b_in(b_out.p_b),
         
         // From FU Mem
-        .write_mem_en(fu_mem_done),
-        .data_mem_in(data_mem_in),
-        .pd_mem_in(p_mem_in),
+        .write_mem_en(mem_out.fu_mem_done),
+        .data_mem_in(mem_out.data),
+        .pd_mem_in(mem_out.p_mem),
         
         // From RS
         .read_en_alu(alu_issued),
@@ -308,14 +278,49 @@ module ooo_top (
         .ps2_out_mem(ps2_out_mem)
     );
     
-    logic ren_in_fire;
-    assign ren_in_fire = v_dsb && r_to_sb_d;
+    fus u_fus(
+        .clk(clk),
+        .reset(reset),
+        
+        // From RSs
+        .alu_issued(alu_issued),
+        .alu_rs_data(rs_alu),
+        .b_issued(b_issued),
+        .b_rs_data(rs_b),
+        .mem_issued(mem_issued),
+        .mem_rs_data(rs_mem),
+        
+        // From ROB
+        .curr_rob_tag(rob_index),
+        .mispredict(mispredict),
+        .mispredict_tag(mispredict_tag),
+        
+        .ps1_alu_data(ps1_out_alu),
+        .ps2_alu_data(ps2_out_alu),
+        .ps1_b_data(ps1_out_b),
+        .ps2_b_data(ps2_out_b),
+        .ps1_mem_data(ps1_out_mem),
+        .ps2_mem_data(ps2_out_mem),
+        
+        // From FU branch
+        .br_mispredict(b_out.mispredict),
+        .br_mispredict_tag(b_out.mispredict_tag),
+        
+        // Output data
+        .alu_out(alu_out),
+        .b_out(b_out),
+        .mem_out(mem_out)
+    );
     
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             pc_reg <= 32'h0000_0000;
         end else if (fetch_fire) begin
-            pc_reg <= pc_reg + 32'd4;
+            if (b_out.fu_b_done && b_out.jalr_bne_signal) begin
+                pc_reg <= b_out.pc;
+            end else begin
+                pc_reg <= pc_reg + 4;
+            end
         end
     end
 endmodule

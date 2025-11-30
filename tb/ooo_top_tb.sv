@@ -3,413 +3,213 @@ import types_pkg::*;
 
 module ooo_top_tb;
 
-  // Clock / Reset 
+  // ---------------- Clock / Reset / DUT ----------------
   logic clk   = 0;
   logic reset = 1;
-
-  localparam int CLK_PERIOD = 10;  // 10 ns, 100 MHz
-
-  // exec_ready from "execute" back to backend
   logic exec_ready;
 
-  // Fake FU to DUT signals 
-  // ISSUE-SLOT READY
-  logic        fu_alu_ready_tb;
-  logic        fu_b_ready_tb;
-  logic        fu_mem_ready_tb;
+  localparam int CLK_PERIOD = 10;  // 100 MHz
 
-  // COMPLETION VALID
-  logic        fu_alu_done_tb;
-  logic        fu_b_done_tb;
-  logic        fu_mem_done_tb;
-
-  // ROB tags for completed instructions
-  logic [4:0]  rob_fu_alu_tb;
-  logic [4:0]  rob_fu_b_tb;
-  logic [4:0]  rob_fu_mem_tb;
-
-  // Preg wakeup broadcasts (p_*_in)
-  logic [6:0]  ps_in_alu_tb;
-  logic [6:0]  ps_in_b_tb;    // not connected to DUT (no p_b_in), just for debug
-  logic [6:0]  ps_in_mem_tb;
-
-  // Data from FUs into PRF
-  logic [31:0] data_alu_in_tb;
-  logic [31:0] data_mem_in_tb;
-
-  // DUT 
-  ooo_top dut (
-    .clk          (clk),
-    .reset        (reset),
-    .exec_ready   (exec_ready),
-
-    // FU issue-ready (into dispatch/RS)
-    .fu_alu_ready (fu_alu_ready_tb),
-    .fu_b_ready   (fu_b_ready_tb),
-    .fu_mem_ready (fu_mem_ready_tb),
-
-    // FU completion (into ROB / dispatch)
-    .fu_alu_done  (fu_alu_done_tb),
-    .fu_b_done    (fu_b_done_tb),
-    .fu_mem_done  (fu_mem_done_tb),
-
-    // Completed ROB tags
-    .rob_fu_alu   (rob_fu_alu_tb),
-    .rob_fu_b     (rob_fu_b_tb),
-    .rob_fu_mem   (rob_fu_mem_tb),
-
-    // Preg wakeup (same cycle as fu_*_done)
-    .p_alu_in     (ps_in_alu_tb),
-    .p_mem_in     (ps_in_mem_tb),
-
-    // Data from FUs (now driven by TB, not tied to 0)
-    .data_alu_in  (data_alu_in_tb),
-    .data_mem_in  (data_mem_in_tb)
-  );
-
-  // 100 MHz clock
+  // Clock
   always #(CLK_PERIOD/2) clk = ~clk;
 
-  // Helpers
+  // DUT
+  ooo_top dut (
+    .clk        (clk),
+    .reset      (reset),
+    .exec_ready (exec_ready)
+  );
+
+  // Simple helper
   task automatic run_cycles(input int n);
     repeat (n) @(posedge clk);
   endtask
 
-  // Tie-offs / static signals 
+  // ---------------- Control (reset + run) ----------------
   initial begin
-    exec_ready = 1'b1;   // backend always able to take work, for now
+    $display("=== Starting ooo_top integration test ===");
 
-    // FUs accept new ops by default
-    fu_alu_ready_tb = 1'b1;
-    fu_b_ready_tb   = 1'b1;
-    fu_mem_ready_tb = 1'b1;
+    exec_ready = 1'b1;   // always ready for now
 
-    // Completion defaults
-    fu_alu_done_tb  = 1'b0;
-    fu_b_done_tb    = 1'b0;
-    fu_mem_done_tb  = 1'b0;
-    rob_fu_alu_tb   = '0;
-    rob_fu_b_tb     = '0;
-    rob_fu_mem_tb   = '0;
-    ps_in_alu_tb    = '0;
-    ps_in_b_tb      = '0;
-    ps_in_mem_tb    = '0;
-
-    data_alu_in_tb  = '0;
-    data_mem_in_tb  = '0;
-  end
-
-  // Reset sequence 
-  initial begin
+    // Apply reset for a few cycles
     reset = 1'b1;
-    run_cycles(5);           // 5 cycles of reset
+    run_cycles(5);
+
     reset = 1'b0;
     $display("[%0t] Deassert reset", $time);
+    $display("[%0t] Warm-up: letting instructions flow", $time);
 
-    // Safety guard
-    run_cycles(1000);
-    $display("[%0t] TEST DONE (timeout)", $time);
+    // Let the program run for a while
+    run_cycles(200);
+
+    $display("[%0t] Ending ooo_top integration test", $time);
     $finish;
   end
 
-  //   Backpressure corner-case: FU NOT READY
+  // ---------------- Handy wires into DUT internals ----------------
 
-  initial begin
-    @(negedge reset);         // wait until reset deasserted
-    run_cycles(40);           // let pipeline warm up
+  // Fetch fire (already computed inside ooo_top)
+  wire fetch_fire_tb = dut.fetch_fire;
 
-    $display("[%0t] *** TEST: Stall ALU FU (fu_alu_ready_tb=0) to exercise RS full / backpressure ***", $time);
-    fu_alu_ready_tb = 1'b0;   // ALU cannot accept issues
-    run_cycles(30);           // keep it stalled for a while
+  // Simple branch "taken" indicator (for PC checker):
+  // branch FU signals that a JALR/BNE-style redirect is happening
+  wire branch_taken_tb = dut.b_out.fu_b_done && dut.b_out.jalr_bne_signal;
 
-    $display("[%0t] *** RELEASE: ALU FU ready again (fu_alu_ready_tb=1) ***", $time);
-    fu_alu_ready_tb = 1'b1;   // allow ALU issues again
-  end
+  // ---------------- PC Checker (fixed off-by-one) ----------------
+  logic [31:0] prev_pc;
+  logic        prev_branch_taken;
+  logic [31:0] prev_branch_pc;
+  logic        prev_fetch_fire;
 
-  // Handshake
-
-  wire fetch_fire_tb     = dut.fetch_fire;
-  wire ren_in_fire_tb    = dut.ren_in_fire;
-  wire ren_out_fire_tb   = dut.r_to_bf_di && dut.r_sb_to_r;
-  wire disp_in_fire_tb   = dut.v_sb_to_di && dut.r_di_to_sb;
-  wire rob_write_fire_tb = dut.rob_write_en;
-
-  // Issue + RS outputs from top-level dispatch/RS
-  wire    alu_issued_tb = dut.alu_issued;
-  wire    b_issued_tb   = dut.b_issued;
-  wire    mem_issued_tb = dut.mem_issued;
-
-  rs_data rs_alu_tb;
-  rs_data rs_b_tb;
-  rs_data rs_mem_tb;
-
-  assign rs_alu_tb = dut.rs_alu;
-  assign rs_b_tb   = dut.rs_b;
-  assign rs_mem_tb = dut.rs_mem;
-
-  //  Fake execute pipelines for ALU / Branch / Mem
-
-  typedef struct {
-    logic [4:0] rob_tag;
-    logic [6:0] pd;
-    int         cycles_left;
-  } fu_job_t;
-
-  // Per-FU queues
-  fu_job_t alu_q[$];
-  fu_job_t br_q[$];
-  fu_job_t mem_q[$];
-
-  localparam int ALU_LAT = 3;
-  localparam int BR_LAT  = 3;
-  localparam int MEM_LAT = 3;
-
-  // Main fake-execute process
-  always_ff @(posedge clk or posedge reset) begin
+  always_ff @(posedge clk) begin
     if (reset) begin
-      fu_alu_done_tb  <= 1'b0;
-      fu_b_done_tb    <= 1'b0;
-      fu_mem_done_tb  <= 1'b0;
-
-      alu_q.delete();
-      br_q.delete();
-      mem_q.delete();
+      prev_pc           <= 32'h0000_0000;
+      prev_branch_taken <= 1'b0;
+      prev_branch_pc    <= 32'h0000_0000;
+      prev_fetch_fire   <= 1'b0;
     end else begin
-      // Default: no completion pulse this cycle
-      fu_alu_done_tb  <= 1'b0;
-      fu_b_done_tb    <= 1'b0;
-      fu_mem_done_tb  <= 1'b0;
-
-      // 1) Capture ISSUE events from each RS
-
-      // ALU issue
-      if (alu_issued_tb) begin
-        fu_job_t job;
-        job.rob_tag     = rs_alu_tb.rob_index;
-        job.pd          = rs_alu_tb.pd;
-        job.cycles_left = ALU_LAT;
-        alu_q.push_back(job);
-
-        $display("[%0t] ALU ISSUE : fu=%0d pd=%0d ps1=%0d ps2=%0d rob=%0d ps1_r=%0b ps2_r=%0b",
-                 $time,
-                 rs_alu_tb.fu, rs_alu_tb.pd, rs_alu_tb.ps1, rs_alu_tb.ps2,
-                 rs_alu_tb.rob_index, rs_alu_tb.ps1_ready, rs_alu_tb.ps2_ready);
+      // We check the PC *one cycle after* the fetch that consumed an instruction.
+      if (prev_fetch_fire) begin
+        if (prev_branch_taken) begin
+          // Expect PC to equal last branch target
+          if (dut.pc_reg !== prev_branch_pc) begin
+            $error("[%0t] PC mismatch on branch: got 0x%08h, expected 0x%08h",
+                   $time, dut.pc_reg, prev_branch_pc);
+          end else begin
+            $display("[%0t] PC OK (branch) : pc_reg=0x%08h",
+                     $time, dut.pc_reg);
+          end
+        end else begin
+          // Expect sequential PC+4
+          if (dut.pc_reg !== (prev_pc + 32'd4)) begin
+            $error("[%0t] PC mismatch on sequential step: prev=0x%08h, got=0x%08h",
+                   $time, prev_pc, dut.pc_reg);
+          end else begin
+            $display("[%0t] PC OK (seq)    : 0x%08h -> 0x%08h",
+                     $time, prev_pc, dut.pc_reg);
+          end
+        end
       end
 
-      // Branch issue
-      if (b_issued_tb) begin
-        fu_job_t job;
-        job.rob_tag     = rs_b_tb.rob_index;
-        job.pd          = rs_b_tb.pd;  // usually 0 for pure branches
-        job.cycles_left = BR_LAT;
-        br_q.push_back(job);
-
-        $display("[%0t] BR  ISSUE : fu=%0d pd=%0d ps1=%0d ps2=%0d rob=%0d ps1_r=%0b ps2_r=%0b",
-                 $time,
-                 rs_b_tb.fu, rs_b_tb.pd, rs_b_tb.ps1, rs_b_tb.ps2,
-                 rs_b_tb.rob_index, rs_b_tb.ps1_ready, rs_b_tb.ps2_ready);
-      end
-
-      // MEM issue
-      if (mem_issued_tb) begin
-        fu_job_t job;
-        job.rob_tag     = rs_mem_tb.rob_index;
-        job.pd          = rs_mem_tb.pd;  // loads nonzero, stores 0
-        job.cycles_left = MEM_LAT;
-        mem_q.push_back(job);
-
-        $display("[%0t] MEM ISSUE : fu=%0d pd=%0d ps1=%0d ps2=%0d rob=%0d ps1_r=%0b ps2_r=%0b",
-                 $time,
-                 rs_mem_tb.fu, rs_mem_tb.pd, rs_mem_tb.ps1, rs_mem_tb.ps2,
-                 rs_mem_tb.rob_index, rs_mem_tb.ps1_ready, rs_mem_tb.ps2_ready);
-      end
-
-      // 2) Decrement countdowns for all jobs
-      for (int i = 0; i < alu_q.size(); i++)
-        if (alu_q[i].cycles_left > 0) alu_q[i].cycles_left--;
-
-      for (int i = 0; i < br_q.size(); i++)
-        if (br_q[i].cycles_left > 0) br_q[i].cycles_left--;
-
-      for (int i = 0; i < mem_q.size(); i++)
-        if (mem_q[i].cycles_left > 0) mem_q[i].cycles_left--;
-
-      // 3) Fire completions when jobs reach 0 (one per FU per cycle for simplicity)
-
-      // ALU complete
-      if (alu_q.size() > 0 && (alu_q[0].cycles_left == 0)) begin
-        fu_alu_done_tb  <= 1'b1;
-        rob_fu_alu_tb   <= alu_q[0].rob_tag;
-        ps_in_alu_tb    <= alu_q[0].pd;  // broadcast dest preg
-
-        // Write some non-zero pattern into PRF based on pd
-        data_alu_in_tb  <= {24'hA5_00, alu_q[0].pd};  // e.g., 0xA500 + pd
-
-        $display("[%0t] FAKE ALU COMPLETE: rob_tag=%0d pd=%0d data=%08h",
-                 $time, alu_q[0].rob_tag, alu_q[0].pd, data_alu_in_tb);
-        alu_q.pop_front();
-      end
-
-      // Branch complete
-      if (br_q.size() > 0 && (br_q[0].cycles_left == 0)) begin
-        fu_b_done_tb  <= 1'b1;
-        rob_fu_b_tb   <= br_q[0].rob_tag;
-
-        // Branch dest usually 0; still keep ps_in_b_tb for debug
-        ps_in_b_tb    <= br_q[0].pd;
-
-        $display("[%0t] FAKE BR  COMPLETE: rob_tag=%0d",
-                 $time, br_q[0].rob_tag);
-        br_q.pop_front();
-      end
-
-      // MEM complete
-      if (mem_q.size() > 0 && (mem_q[0].cycles_left == 0)) begin
-        fu_mem_done_tb  <= 1'b1;
-        rob_fu_mem_tb   <= mem_q[0].rob_tag;
-
-        // Loads: pd != 0; Stores: pd == 0
-        ps_in_mem_tb    <= mem_q[0].pd;
-        data_mem_in_tb  <= {24'h5A_00, mem_q[0].pd};  // another pattern
-
-        $display("[%0t] FAKE MEM COMPLETE: rob_tag=%0d pd=%0d data=%08h",
-                 $time, mem_q[0].rob_tag, mem_q[0].pd, data_mem_in_tb);
-        mem_q.pop_front();
-      end
-
+      // Update history for *next* cycle
+      prev_pc           <= dut.pc_reg;
+      prev_branch_taken <= branch_taken_tb;
+      prev_branch_pc    <= dut.b_out.pc;
+      prev_fetch_fire   <= fetch_fire_tb;
     end
   end
 
-  // Monitors
+  // ---------------- Debug printing / pipeline tracing ----------------
 
-  // PC and Fetch monitor + PC+4 assertion
-  logic [31:0] last_pc;
-
-  always @(posedge clk) begin
+  // FETCH
+  always_ff @(posedge clk) begin
     if (!reset && fetch_fire_tb) begin
-      $display("[%0t] FETCH     : pc=%h instr=%h v_fetch=%0b r_to_fetch=%0b",
-               $time,
-               dut.pc_reg,
-               dut.fetch_out.instr,
-               dut.v_fetch,
-               dut.r_to_fetch);
+      fetch_data f = dut.fetch_out;
+      $display("[%0t] FETCH : pc=0x%08h instr=0x%08h pc_4=0x%08h",
+               $time, f.pc, f.instr, f.pc_4);
+    end
+  end
 
-      // Simple PC + 4 check after the first step
-      if (last_pc != 32'h0 && dut.pc_reg != last_pc + 32'd4) begin
-        $error("[%0t] PC did not increment by 4: prev=%h now=%h",
-               $time, last_pc, dut.pc_reg);
+  // DECODE → RENAME (decode output)
+  always_ff @(posedge clk) begin
+    if (!reset && dut.v_decode) begin
+      decode_data d = dut.decode_out;
+      $display("[%0t] DEC→REN : pc=0x%08h rs1=%0d rs2=%0d rd=%0d opcode=0x%02h fu=%0d imm=0x%08h",
+               $time, d.pc, d.rs1, d.rs2, d.rd, d.Opcode, d.fu, d.imm);
+    end
+  end
+
+  // RENAME output
+  always_ff @(posedge clk) begin
+    if (!reset && dut.r_to_bf_di) begin
+      rename_data r = dut.rename_out;
+      $display("[%0t] RENAMEOUT : pc=0x%08h fu=%0d pd_new=%0d pd_old=%0d ps1=%0d ps2=%0d opcode=0x%02h imm=0x%08h rob_tag=%0d",
+               $time, r.pc, r.fu, r.pd_new, r.pd_old, r.ps1, r.ps2,
+               r.Opcode, r.imm[31:0], r.rob_tag);
+    end
+  end
+
+  // RENAME → DISPATCH (post-rename skid out)
+  always_ff @(posedge clk) begin
+    if (!reset && dut.v_sb_to_di && dut.r_di_to_sb) begin
+      rename_data r = dut.sb_to_di_out;
+      $display("[%0t] REN→DIS : pc=0x%08h fu=%0d pd_new=%0d ps1=%0d ps2=%0d rob_tag=%0d",
+               $time, r.pc, r.fu, r.pd_new, r.ps1, r.ps2, r.rob_tag);
+    end
+  end
+
+  // ROB enqueue
+  always_ff @(posedge clk) begin
+    if (!reset && dut.rob_write_en) begin
+      rename_data r = dut.sb_to_di_out;
+      $display("[%0t] ROB ENQ : rob_idx=%0d pc=0x%08h pd_new=%0d pd_old=%0d",
+               $time, dut.rob_index, r.pc, r.pd_new, r.pd_old);
+    end
+  end
+
+  // ISSUE from RS: ALU / MEM / BR
+  always_ff @(posedge clk) begin
+    if (!reset && dut.alu_issued) begin
+      rs_data ra = dut.rs_alu;
+      $display("[%0t] ISSUE ALU : rob=%0d pd=%0d ps1=%0d ps2=%0d",
+               $time, ra.rob_index, ra.pd, ra.ps1, ra.ps2);
+    end
+
+    if (!reset && dut.mem_issued) begin
+      rs_data rm = dut.rs_mem;
+      $display("[%0t] ISSUE MEM : rob=%0d pd=%0d ps1=%0d ps2=%0d",
+               $time, rm.rob_index, rm.pd, rm.ps1, rm.ps2);
+    end
+
+    if (!reset && dut.b_issued) begin
+      rs_data rb = dut.rs_b;
+      $display("[%0t] ISSUE BR  : rob=%0d pd=%0d ps1=%0d ps2=%0d",
+               $time, rb.rob_index, rb.pd, rb.ps1, rb.ps2);
+    end
+  end
+
+  // FU completes: ALU / MEM / BR
+  always_ff @(posedge clk) begin
+    if (!reset && dut.alu_out.fu_alu_done) begin
+      $display("[%0t] FU ALU DONE : rob=%0d pd=%0d data=0x%08h",
+               $time, dut.alu_out.rob_fu_alu, dut.alu_out.p_alu, dut.alu_out.data);
+    end
+
+    if (!reset && dut.mem_out.fu_mem_done) begin
+      $display("[%0t] FU MEM DONE : rob=%0d pd=%0d data=0x%08h",
+               $time, dut.mem_out.rob_fu_mem, dut.mem_out.p_mem, dut.mem_out.data);
+    end
+
+    if (!reset && dut.b_out.fu_b_done) begin
+      $display("[%0t] FU BR  DONE : rob=%0d pd=%0d mispredict=%0b tag=%0d jalr_bne=%0b pc=0x%08h",
+               $time,
+               dut.b_out.rob_fu_b,
+               dut.b_out.p_b,
+               dut.b_out.mispredict,
+               dut.b_out.mispredict_tag,
+               dut.b_out.jalr_bne_signal,
+               dut.b_out.pc);
+    end
+  end
+
+  // ---------------- Global mispredict monitor (with de-dup) ----------------
+  logic [4:0] last_mispredict_tag;
+  logic       seen_mispredict_for_tag;
+
+  always_ff @(posedge clk) begin
+    if (reset) begin
+      last_mispredict_tag     <= '0;
+      seen_mispredict_for_tag <= 1'b0;
+    end else begin
+      if (dut.mispredict) begin
+        if (!seen_mispredict_for_tag || (dut.mispredict_tag != last_mispredict_tag)) begin
+          $display("[%0t] *** GLOBAL MISPREDICT tag=%0d ***",
+                   $time, dut.mispredict_tag);
+          last_mispredict_tag     <= dut.mispredict_tag;
+          seen_mispredict_for_tag <= 1'b1;
+        end
+        // If same tag repeats, we suppress extra prints to avoid spam
       end
-      last_pc <= dut.pc_reg;
-    end
-  end
-
-  // Stop when we hit end-of-program (instr = xxxxxxxx from ROM)
-  always @(posedge clk) begin
-    if (!reset && fetch_fire_tb && (dut.fetch_out.instr === 32'hxxxxxxxx)) begin
-      $display("[%0t] Hit end of program (instr=xxxxxxxx). Stopping.", $time);
-      $finish;
-    end
-  end
-
-  // Decode to Rename input (post-decode skid buffer output into rename)
-  always @(posedge clk) begin
-    if (!reset && ren_in_fire_tb) begin
-      $display("[%0t] DEC→REN   : pc=%h rs1=%0d rs2=%0d rd=%0d opcode=0x%0h aluop=0x%0h imm=%h",
-               $time,
-               dut.sb_d_out.pc,
-               dut.sb_d_out.rs1,
-               dut.sb_d_out.rs2,
-               dut.sb_d_out.rd,
-               dut.sb_d_out.Opcode,
-               dut.sb_d_out.ALUOp,
-               dut.sb_d_out.imm);
-    end
-  end
-
-  // Rename output
-  always @(posedge clk) begin
-    if (!reset && ren_out_fire_tb) begin
-      $display("[%0t] RENAMEOUT : pc=%h fu=%0d pd_new=%0d ps1=%0d ps2=%0d rob_index=%0d",
-               $time,
-               dut.rename_out.pc,
-               dut.rename_out.fu,
-               dut.rename_out.pd_new,
-               dut.rename_out.ps1,
-               dut.rename_out.ps2,
-               dut.rename_out.rob_tag);
-    end
-  end
-
-  // Dispatch input (post-rename skid → dispatch)
-  always @(posedge clk) begin
-    if (!reset && disp_in_fire_tb) begin
-      $display("[%0t] DISPATCHIN: pc=%h fu=%0d pd_new=%0d ps1=%0d ps2=%0d rob_idx_in=%0d",
-               $time,
-               dut.sb_to_di_out.pc,
-               dut.sb_to_di_out.fu,
-               dut.sb_to_di_out.pd_new,
-               dut.sb_to_di_out.ps1,
-               dut.sb_to_di_out.ps2,
-               dut.rob_index);
-    end
-  end
-
-  // ROB write / allocation
-  always @(posedge clk) begin
-    if (!reset && rob_write_fire_tb) begin
-      $display("[%0t] ROBWRITE  : idx=%0d pc=%h pd_new=%0d pd_old=%0d full=%0b",
-               $time,
-               dut.rob_index,
-               dut.sb_to_di_out.pc,
-               dut.sb_to_di_out.pd_new,
-               dut.sb_to_di_out.pd_old,
-               dut.rob_full);
-    end
-  end
-
-  // ROB full / backpressure debug
-  always @(posedge clk) begin
-    if (!reset && dut.v_sb_to_di && dut.rob_full) begin
-      $display("[%0t] ROB FULL (write side seeing full while v_sb_to_di=1)", $time);
-    end
-    if (!reset && dut.v_sb_to_di && !dut.r_di_to_sb) begin
-      $display("[%0t] DISPATCH not ready (r_di_to_sb=0)", $time);
-    end
-  end
-
-  // ROB retire monitor
-  always @(posedge clk) begin
-    if (!reset && dut.valid_retired) begin
-      $display("[%0t] ROB RETIRE: preg_old=%0d (free this reg)",
-               $time, dut.preg_old);
-    end
-  end
-
-  //   EXTRA MONITORS: ROB FULL + RS FULL FLAGS + PRF READS
-
-  wire rob_full_tb     = dut.rob_full;
-  wire rs_alu_full_tb  = dut.u_dispatch.rs_alu_full;
-  wire rs_b_full_tb    = dut.u_dispatch.rs_b_full;
-  wire rs_mem_full_tb  = dut.u_dispatch.rs_mem_full;
-
-  // PRF outputs (from phys_reg_file inside ooo_top)
-  wire [31:0] ps1_out_alu_tb = dut.ps1_out_alu;
-  wire [31:0] ps2_out_alu_tb = dut.ps2_out_alu;
-
-  always @(posedge clk) begin
-    if (!reset && rob_full_tb)
-      $display("[%0t] MON: ROB FULL asserted (dut.rob_full=1)", $time);
-    if (!reset && rs_alu_full_tb)
-      $display("[%0t] MON: RS_ALU FULL asserted",  $time);
-    if (!reset && rs_b_full_tb)
-      $display("[%0t] MON: RS_BR  FULL asserted",  $time);
-    if (!reset && rs_mem_full_tb)
-      $display("[%0t] MON: RS_MEM FULL asserted",  $time);
-
-    // When ALU issues, we can peek at the PRF read values
-    if (!reset && alu_issued_tb) begin
-      $display("[%0t] PRF READ  : ALU ps1_val=%08h ps2_val=%08h",
-               $time, ps1_out_alu_tb, ps2_out_alu_tb);
     end
   end
 

@@ -161,23 +161,34 @@ module rob_tb;
         end
     endtask
 
-    // Mispredict (flush younger-than-branch)
+    // Mispredict (flush younger-than-branch) - **strengthened**
     task automatic do_mispredict(input [4:0] tag);
         begin
             $display("[%0t] ---- MISPREDICT at tag=%0d ----", $time, tag);
+
+            // Drive mispredict inputs from branch FU
             br_mispredict_tag = tag;
             br_mispredict     = 1;
-            @(posedge clk);      // DUT recovery
+
+            // On this cycle, ROB must pulse mispredict with correct tag
+            @(posedge clk);
+            assert (mispredict == 1'b1 && mispredict_tag == tag)
+                else $fatal(1,
+                    "[MISPREDICT] expected mispredict=1 tag=%0d, got mispredict=%0b tag=%0d",
+                    tag, mispredict, mispredict_tag);
+
+            // Drop inputs, ROB should recover and deassert mispredict
             br_mispredict     = 0;
             br_mispredict_tag = '0;
+
             @(posedge clk);
+
+            assert(mispredict == 1'b0)
+                else $fatal(1,
+                    "[MISPREDICT] mispredict output should be deasserted after recovery");
 
             // TB tail mirror becomes branch+1
             tb_wptr = inc16(tag);
-
-            // Optional: check pass-through
-            assert(mispredict == 1'b0) else
-                $fatal(1, "[MISPREDICT] mispredict output should be deasserted after recovery");
         end
     endtask
 
@@ -218,8 +229,10 @@ module rob_tb;
             else $fatal(1, "full mismatch: full=%0b ctr=%0d",
                         full, dut.ctr);
     end
+
     logic [6:0] exp_pd_old [0:2];
-    logic [6:0] seen_pd_old [0:2];
+    logic [6:0] seen_pd_old[0:2];
+
     // Tests 
     initial begin
         logic [4:0] t0, t1, t2, t3, t4, t5, newtag;
@@ -361,7 +374,7 @@ module rob_tb;
         else
             $display("TEST 4 PASS: mid-ROB mispredict flushed younger, preserved older + branch, tags reused correctly.");
 
-                // TEST 5: Free-list interface (preg_old / valid_retired)
+        // TEST 5: Free-list interface (preg_old / valid_retired)
         $display("TEST 5: preg_old / valid_retired sequence");
 
         apply_reset();

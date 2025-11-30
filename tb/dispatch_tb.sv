@@ -372,10 +372,10 @@ module dispatch_tb;
             $error("FAIL: ALU RS should have drained.");
 
         // MISPREDICT TESTS
-        $display("\n=== Starting Mispredict Tests ===");
+        $display("\nStarting Mispredict Tests");
         reset_dut();
 
-        // ---- Test 9: simple mispredict flush (non-wrap) ----
+        // Test 9: simple mispredict flush (non-wrap) 
         $display("Test 9: ALU mispredict flush (ROB=0,1,2,3; mispred=1, tail=4)");
         // Dispatch 4 ALU ops with explicit ROB tags
         dispatch_op_with_tag(2'b01, 7'd40, 5'd0);
@@ -405,7 +405,7 @@ module dispatch_tb;
         else
             $display("T9 PASS: younger ROB entries 2,3 flushed; 0,1 preserved.");
 
-        // ---- Test 10: mispredict with ROB wrap-around ----
+        // Test 10: mispredict with ROB wrap-around
         $display("Test 10: ALU mispredict with ROB wrap-around (14,15,0,1; mispred=15, tail=2)");
         reset_dut();
 
