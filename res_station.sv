@@ -42,7 +42,8 @@ module res_station(
                 in_idx = i;
                 in_valid = 1'b1;
             end
-            if (!out_ready && rs_table[i].ready && rs_table[i].valid) begin
+            if (!out_ready && preg_rtable[rs_table[i].ps1] 
+            && preg_rtable[rs_table[i].ps2] && rs_table[i].valid) begin
                 out_idx = i;
                 out_ready = 1'b1;
             end
@@ -71,21 +72,6 @@ module res_station(
                     end
                 end
             end else begin
-                for (logic [3:0] i = 0; i <= 7; i++) begin
-                    if (rs_table[i].valid) begin
-                        if (!rs_table[i].ps1_ready && preg_rtable[rs_table[i].ps1]) begin
-                            rs_table[i].ps1_ready <= 1'b1;
-                        end
-                        if (!rs_table[i].ps2_ready && preg_rtable[rs_table[i].ps2]) begin
-                            rs_table[i].ps2_ready <= 1'b1;
-                        end
-                
-                        if (rs_table[i].ps1_ready && rs_table[i].ps2_ready) begin
-                            rs_table[i].ready <= 1'b1;
-                        end
-                    end
-                end
-                // Don't guard fu_ready for now
                 if (out_ready && fu_ready) begin
                     data_out <= rs_table[out_idx];
                     rs_table[out_idx] <= '0;
